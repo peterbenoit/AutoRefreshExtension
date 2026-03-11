@@ -4,19 +4,59 @@
 if (typeof window.autoRefreshInjected === 'undefined') {
     window.autoRefreshInjected = true;
 
-    let timerId = null;
     let currentRemaining = 0;
     let uiUpdateIntervalId = null;
+    let isPaused = false;
+    let inactivityTimerId = null;
+    const INACTIVITY_DELAY_MS = 30000;
+
+    function handleUserActivity() {
+        if (!uiUpdateIntervalId) return; // Only track activity if timer is running
+
+        if (!isPaused) {
+            isPaused = true;
+            try {
+                chrome.runtime.sendMessage({ type: 'UPDATE_BADGE', remaining: currentRemaining, isPaused: true }).catch(() => { });
+            } catch (e) { }
+        }
+
+        if (inactivityTimerId !== null) {
+            clearTimeout(inactivityTimerId);
+        }
+
+        inactivityTimerId = setTimeout(() => {
+            isPaused = false;
+            try {
+                chrome.runtime.sendMessage({ type: 'UPDATE_BADGE', remaining: currentRemaining, isPaused: false }).catch(() => { });
+            } catch (e) { }
+        }, INACTIVITY_DELAY_MS);
+    }
+
+    const activityEvents = ['mousemove', 'keydown', 'scroll', 'click', 'touchstart'];
+    
+    function attachActivityListeners() {
+        activityEvents.forEach(type => {
+            document.addEventListener(type, handleUserActivity, { passive: true });
+        });
+    }
+
+    function detachActivityListeners() {
+        activityEvents.forEach(type => {
+            document.removeEventListener(type, handleUserActivity, { passive: true });
+        });
+    }
 
     function clearExistingTimers() {
-        if (timerId !== null) {
-            clearTimeout(timerId);
-            timerId = null;
-        }
         if (uiUpdateIntervalId !== null) {
             clearInterval(uiUpdateIntervalId);
             uiUpdateIntervalId = null;
         }
+        if (inactivityTimerId !== null) {
+            clearTimeout(inactivityTimerId);
+            inactivityTimerId = null;
+        }
+        isPaused = false;
+        detachActivityListeners();
     }
 
     function startTimer(settings) {
@@ -33,36 +73,41 @@ if (typeof window.autoRefreshInjected === 'undefined') {
         }
 
         currentRemaining = targetIntervalSeconds;
+        isPaused = false;
+
+        if (settings.pauseWhileActive !== false) {
+            attachActivityListeners();
+        }
 
         // Send initial badge update
         try {
-            chrome.runtime.sendMessage({ type: 'UPDATE_BADGE', remaining: currentRemaining }).catch(() => { });
+            chrome.runtime.sendMessage({ type: 'UPDATE_BADGE', remaining: currentRemaining, isPaused: false }).catch(() => { });
         } catch (e) { }
 
-        // Tick every second to update UI
+        // Tick every second to update UI and handle reload
         uiUpdateIntervalId = setInterval(() => {
-            currentRemaining -= 1;
+            if (!isPaused) {
+                currentRemaining -= 1;
+            }
+
             if (currentRemaining > 0) {
                 try {
-                    chrome.runtime.sendMessage({ type: 'UPDATE_BADGE', remaining: currentRemaining }).catch(() => { });
+                    chrome.runtime.sendMessage({ type: 'UPDATE_BADGE', remaining: currentRemaining, isPaused: isPaused }).catch(() => { });
                 } catch (e) {
                     // Extension context invalidated (e.g., reloaded extension)
                     clearExistingTimers();
                 }
+            } else {
+                clearExistingTimers();
+                try {
+                    // We tell the background script to reload us so it handles bypass cache properly 
+                    chrome.runtime.sendMessage({ type: 'PERFORM_RELOAD' }).catch(() => { });
+                } catch (e) {
+                    // Fallback if background disconnected
+                    location.reload();
+                }
             }
         }, 1000);
-
-        // The actual reload timer
-        timerId = setTimeout(() => {
-            clearExistingTimers();
-            try {
-                // We tell the background script to reload us so it handles bypass cache properly 
-                chrome.runtime.sendMessage({ type: 'PERFORM_RELOAD' }).catch(() => { });
-            } catch (e) {
-                // Fallback if background disconnected
-                location.reload();
-            }
-        }, targetIntervalSeconds * 1000);
     }
 
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {

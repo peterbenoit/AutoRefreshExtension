@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const secondsInput = document.getElementById('seconds');
     const randomizeCheckbox = document.getElementById('randomize');
     const hardReloadCheckbox = document.getElementById('hardReload');
+    const pauseWhileActiveCheckbox = document.getElementById('pauseWhileActive');
     const statusMessage = document.getElementById('statusMessage');
     const countdownSpan = document.getElementById('countdown');
 
@@ -23,14 +24,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         secondsInput.value = totalSeconds % 60;
         randomizeCheckbox.checked = state.randomize;
         hardReloadCheckbox.checked = state.hardReload;
+        pauseWhileActiveCheckbox.checked = state.pauseWhileActive !== undefined ? state.pauseWhileActive : true;
         statusMessage.classList.remove('hidden');
+
+        if (state.isPaused) {
+            statusMessage.textContent = 'Paused (Activity detected).';
+        } else if (state.lastRemaining !== undefined) {
+             const span = document.getElementById('countdown');
+             if (span) span.textContent = state.lastRemaining;
+        }
     } else {
         // Tab is not active, load defaults from storage if available
-        chrome.storage.local.get(['defaultMinutes', 'defaultSeconds', 'defaultRandomize', 'defaultHardReload'], (res) => {
+        chrome.storage.local.get(['defaultMinutes', 'defaultSeconds', 'defaultRandomize', 'defaultHardReload', 'defaultPauseWhileActive'], (res) => {
             if (res.defaultMinutes !== undefined) minutesInput.value = res.defaultMinutes;
             if (res.defaultSeconds !== undefined) secondsInput.value = res.defaultSeconds;
             if (res.defaultRandomize !== undefined) randomizeCheckbox.checked = res.defaultRandomize;
             if (res.defaultHardReload !== undefined) hardReloadCheckbox.checked = res.defaultHardReload;
+            if (res.defaultPauseWhileActive !== undefined) pauseWhileActiveCheckbox.checked = res.defaultPauseWhileActive;
+            else pauseWhileActiveCheckbox.checked = true; // Default to true
         });
     }
 
@@ -48,7 +59,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 defaultMinutes: m,
                 defaultSeconds: s,
                 defaultRandomize: randomizeCheckbox.checked,
-                defaultHardReload: hardReloadCheckbox.checked
+                defaultHardReload: hardReloadCheckbox.checked,
+                defaultPauseWhileActive: pauseWhileActiveCheckbox.checked
             });
 
             // Start timer
@@ -58,7 +70,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 settings: {
                     interval: totalSeconds,
                     randomize: randomizeCheckbox.checked,
-                    hardReload: hardReloadCheckbox.checked
+                    hardReload: hardReloadCheckbox.checked,
+                    pauseWhileActive: pauseWhileActiveCheckbox.checked
                 }
             });
             statusMessage.classList.remove('hidden');
@@ -80,7 +93,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             defaultMinutes: m,
             defaultSeconds: s,
             defaultRandomize: randomizeCheckbox.checked,
-            defaultHardReload: hardReloadCheckbox.checked
+            defaultHardReload: hardReloadCheckbox.checked,
+            defaultPauseWhileActive: pauseWhileActiveCheckbox.checked
         });
     };
 
@@ -88,11 +102,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     secondsInput.addEventListener('change', saveDefaults);
     randomizeCheckbox.addEventListener('change', saveDefaults);
     hardReloadCheckbox.addEventListener('change', saveDefaults);
+    pauseWhileActiveCheckbox.addEventListener('change', saveDefaults);
 
     // Listen to tick updates from the content script for real-time countdown
     chrome.runtime.onMessage.addListener((request, sender) => {
         if (request.type === 'UPDATE_BADGE' && sender.tab && sender.tab.id === tab.id) {
-            countdownSpan.textContent = request.remaining;
+            if (request.isPaused) {
+                statusMessage.textContent = 'Paused (Activity detected).';
+            } else {
+                const span = document.getElementById('countdown');
+                if (span) {
+                    span.textContent = request.remaining;
+                } else {
+                    statusMessage.innerHTML = 'Tab will refresh in <span id="countdown">' + request.remaining + '</span>s';
+                }
+            }
         }
     });
 });

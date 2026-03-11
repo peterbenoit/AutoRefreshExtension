@@ -38,12 +38,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   else if (request.type === 'UPDATE_BADGE') {
     // Coming from the content script
     if (sender.tab && sender.tab.id && activeTabs[sender.tab.id]) {
+      activeTabs[sender.tab.id].lastRemaining = request.remaining;
+      activeTabs[sender.tab.id].isPaused = request.isPaused;
+
       const remainingSeconds = request.remaining;
+      const isPaused = request.isPaused;
+
       let text = remainingSeconds.toString();
       if (remainingSeconds > 99) {
         text = Math.floor(remainingSeconds / 60) + 'm';
       }
-      chrome.action.setBadgeText({ tabId: sender.tab.id, text: text });
+
+      if (isPaused) {
+        chrome.action.setBadgeText({ tabId: sender.tab.id, text: '||' });
+        chrome.action.setBadgeBackgroundColor({ tabId: sender.tab.id, color: '#f59e0b' });
+      } else {
+        chrome.action.setBadgeText({ tabId: sender.tab.id, text: text });
+        chrome.action.setBadgeBackgroundColor({ tabId: sender.tab.id, color: '#07c6cc' });
+      }
     }
   }
 
